@@ -6,9 +6,9 @@ Zooms into each of the three top-level systems from [Level 1](../00-context/) an
 
 ## Per-system zooms
 
-- [Live Trading](live-trading.md) — supervisor + N trading engines + param control + admin UI + observability stack.
-- Feed Archiver — TBD.
-- Backtest — TBD.
+- [Live Trading](live-trading.md) — control plane (Caddy + Control Hub SPA + ProcessManager + ParamGateway) and data plane (feed_router + risk_manager + order_router + N engines + observability).
+- [Feed Archiver](feed-archiver.md) — WS collection binary + tick_packer + rclone cloud sync, writing to Local Tick Archive.
+- [Backtest](backtest.md) — backtest_app + grid_search + data_manager for local/cloud tick resolution, results as CSV + equity curves.
 
 ## Not shown at this level
 
