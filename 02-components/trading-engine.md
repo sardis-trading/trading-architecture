@@ -158,7 +158,7 @@ flowchart TB
     pm -->|equity delta| risk
     pm -->|equity snapshot| metrics
 
-    exchange -.->|BUDS balance update<br/>(forwarded from order_router)| capital
+    exchange -.->|"BUDS balance update<br/>(forwarded from order_router)"| capital
     capital -->|clamp max_position_size,<br/>max_open_order_exposure| oe
 
     ks -.->|cancel_all_orders / emergency_halt| oe
