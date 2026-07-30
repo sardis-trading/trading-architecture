@@ -173,6 +173,31 @@ flowchart TB
 
 Deferred-trip pattern: the trip decision is made on whichever thread noticed the condition, but callbacks run on the main engine thread to avoid re-entering the exchange or the strategy from a non-owning thread.
 
+**Trip conditions.** `KillSwitch::activate(reason, details)` fires for one of nine categorised reasons. Each has a specific source path:
+
+| Reason (enum) | What triggers it | Fired from |
+|---------------|-------------------|-----------|
+| `MANUAL` | Operator explicit trip via ParamGateway or admin API | Control plane |
+| `EXCESSIVE_LOSS` | Daily PnL breach or drawdown-velocity breach | RiskManager / TradingEngineBase |
+| `POSITION_BREACH` | Position limit exceeded (should be caught at pre-trade but is a runtime safety net) | RiskManager / TradingEngineBase |
+| `ORDER_RATE_EXCEEDED` | Order rate limit exceeded persistently | RiskManager / order queue overflow watchdog |
+| `MARKET_DISCONNECT` | Market feed silent past staleness threshold, or User Data Stream stale past `stale_killswitch_s` | `TickStalenessWatchdog`, `BinanceUserDataStream` |
+| `RISK_VIOLATION` | General risk-check failure that shouldn't be recoverable | `TradingEngineBase` (order queue push failures crossing threshold) |
+| `COMPLIANCE_ALERT` | Post-trade surveillance flagged wash trade, layering/spoofing, or order stuffing pattern | `PostTradeSurveillance` (3 detection paths) |
+| `SYSTEM_ERROR` | Uncategorised system-level failure — unexpected exception path | Various |
+| `EXTERNAL_SIGNAL` | Trip issued by another container (e.g. `order_router` decides all engines should halt) | Cross-container signalling path |
+
+**Order queue overflow is a specific trip path** worth calling out: the main loop's `check_order_queue_overflow(prev_push_failures)` runs each iteration. When strategy pushes to the order SPSC keep failing (queue full because the engine can't drain), that counter climbs. Past a threshold it activates `KillSwitchReason::RISK_VIOLATION`. This is why a persistently misbehaving strategy takes the whole engine down instead of silently dropping orders.
+
+**Recovery from a trip.**
+1. Trip fires → callbacks run on main loop → orders cancelled, engine halted.
+2. Engine exits cleanly (or is killed by ProcessManager if halt hangs).
+3. `ProcessManager` restarts the engine as a fresh process.
+4. On startup, engine replays fills from QuestDB to reconstruct `PositionManager` state (position recovery — see Level 4 flow, TBD).
+5. If the trip reason indicated a market or compliance condition that hasn't cleared, the engine trips itself again on the same source and stays dead until an operator explicitly resets via `KillSwitch::reset(auth_token)`.
+
+Reset requires an auth token when `require_auth_for_reset_` is enabled — prevents automated retry loops from bypassing the operator's judgement.
+
 **Capital management.**
 - Layer 1 (`log_capital_status`) — periodic account-balance query, log free balances, WARN when USD-denominated risk limits in config exceed `wallet × 0.9`. Pure observability.
 - Layer 2 (`apply_capital_caps`) — clamp `max_open_order_exposure` and `max_position_size` to `min(config, stablecoin_usd_free × 0.9)`, push clamped limits into RiskManager. Fires on every BUDS balance update via `on_balance_update_static` trampoline.
