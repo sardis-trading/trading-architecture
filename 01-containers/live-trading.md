@@ -51,11 +51,10 @@ flowchart TB
     subgraph host["Live Trading host — data plane"]
         subgraph shared["Shared wire-layer services"]
             feedrouter["feed_router<br/>WS in, shm out"]
-            riskmgr["risk_manager<br/>cross-engine pre-trade checks"]
-            orderrouter["order_router<br/>REST + UDS to venue"]
+            orderrouter["order_router<br/>REST + UDS to venue,<br/>per-account rate limit"]
         end
 
-        subgraph engines_data["Trading engines (N)"]
+        subgraph engines_data["Trading engines (N)<br/>(each contains its own RiskManager)"]
             eng1["mm-btcusdt-1"]
             eng2["mm-ethusdt-1"]
             engN["..."]
@@ -73,8 +72,7 @@ flowchart TB
     feedrouter -->|publishes| shmfeed
     shmfeed -->|reads| engines_data
 
-    engines_data -->|submit / cancel| riskmgr
-    riskmgr -->|forward approved| orderrouter
+    engines_data -->|submit / cancel (after in-engine risk check)| orderrouter
     orderrouter <-->|REST orders + UDS fills| binance
     orderrouter -->|route fills to originating engine| engines_data
 
@@ -85,6 +83,8 @@ flowchart TB
     operator_dash -->|views| grafana
 ```
 
+**Note on risk placement.** Pre-trade risk checks run **inside each engine** (single-threaded on the Execution thread, target <100ns per check). They are not a separate container. Extracting risk into its own service would break the latency budget on the check itself. If future requirements introduce cross-engine risk (shared capital pool, cross-symbol correlated exposure caps, firm-wide kill switch beyond a shared atomic file), extracting the risk manager becomes worth the latency cost — until then, in-engine is the right shape.
+
 ## Containers
 
 | Container | What it is | Talks to |
@@ -94,9 +94,8 @@ flowchart TB
 | **ProcessManager** | Supervisor daemon. Spawns and watches engine processes via `waitpid()`. Watches `config/engines/` directory for TOML changes and reacts (add → spawn, modify → SIGTERM + respawn, delete → SIGTERM + cleanup). Maintains engine state file. | Filesystem (config, state), engines (spawn/signal), logs |
 | **ParamGateway** | TCP server on :9876. Receives runtime parameter change commands from the operator (via Control Hub) and forwards them to the right engine. Uses UDP discovery so engines self-register. | Engines (TCP param updates) |
 | **feed_router** | Holds the WS connections to Binance. Normalises depth + trade messages into ticks and publishes them into per-symbol shared-memory rings. Engines never touch the venue for market data directly. | Binance (WS), shm rings (writer) |
-| **risk_manager** | Cross-engine pre-trade check. Engines send submit/cancel intents here; risk validates against exposure limits, kill switch state, and any other cross-engine rules; approved orders forwarded to `order_router`. | Engines (upstream), order_router (downstream) |
-| **order_router** | Holds Binance REST connection and the User Data Stream. Forwards approved orders to the venue, routes acknowledgements and fills back to the originating engine. | risk_manager (upstream), Binance (REST + UDS), engines (fills back) |
-| **Trading engine** (N instances) | The `trading_system` binary, one process per engine config. Reads ticks from shm, applies its strategy, submits orders to risk_manager, writes metrics to QuestDB, logs locally. | shm rings (reader), risk_manager (submit), order_router (fills back), QuestDB (ILP), ParamGateway (as target), filesystem (logs) |
+| **order_router** | Holds Binance REST connection and the User Data Stream. Central point for all N engines' order flow — session, listenKey, and per-account rate limit are managed here. Forwards orders to the venue, routes acknowledgements and fills back to the originating engine via `client_order_id` remapping. | Engines (bidirectional), Binance (REST + UDS) |
+| **Trading engine** (N instances) | The `trading_system` binary, one process per engine config. Reads ticks from shm, runs its in-process RiskManager for pre-trade checks, applies its strategy, submits approved orders to `order_router`, writes metrics to QuestDB, logs locally. | shm rings (reader), order_router (submit + fills back), QuestDB (ILP), ParamGateway (as target), filesystem (logs) |
 | **QuestDB** | Time-series store for metrics and alerts. Off-the-shelf, typically Docker. External at Level 1; still external here in the sense that it's not part of the trading codebase. | Engines (writers), Grafana (reader) |
 | **Grafana** | Dashboards over QuestDB. Off-the-shelf. | Operator (via Caddy-proxied :3000), QuestDB (reader) |
 
@@ -115,8 +114,9 @@ flowchart TB
 - **ParamGateway → Engine:** TCP text protocol. Engines self-register via UDP announcement on start; ParamGateway holds their addresses in a live map.
 - **feed_router → Binance:** WS for depth + trade streams. Normalises and publishes ticks to shm rings.
 - **feed_router → Engines:** Shared-memory rings, one ring per symbol. Non-blocking reads on the engine side.
-- **Engine → risk_manager:** IPC (TCP, unix socket, or shm mailbox) for submit/cancel intents.
+- **Engine → order_router:** Loopback TCP (:9877). Engine's `RiskManager` runs the pre-trade check in-process first; only approved orders leave the engine.
 - **order_router ↔ Binance:** REST for order submission, WebSocket User Data Stream for fills and account events.
+- **order_router → Engines:** Execution reports routed back to the originating engine by extracting `engine_id` from the remapped `client_order_id`.
 - **Engine → QuestDB:** ILP (InfluxDB Line Protocol) over TCP. Non-blocking SPSC queue from hot path to a background TCP writer thread.
 
 ## Not shown at this level

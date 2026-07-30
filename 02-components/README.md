@@ -8,10 +8,11 @@ Zooms into a single container from [Level 2](../01-containers/) and shows its in
 
 - [feed_archiver](feed-archiver.md) — internals of the WS collection binary: BinanceFeedManager, per-group pipeline (WS client → SPSC queue → parser → worker), bootstrap coordinator, sequence gap detector, trade reorder buffer, SymbolRecorder.
 - [backtest_app](backtest.md) — replay engine, single-run tick flow, grid search / walk-forward orchestration. CRTP strategy dispatch, deterministic virtual time, mmap tick reader, bounded order book, fill simulator, metrics collector.
-- [risk_manager](risk-manager.md) — small shared service between engines and order_router. Ingest queue, check engine, limits registry, KillSwitch state reader, reject dispatcher.
-- trading_system — TBD (the trading engine binary — MarketFeed consumer, OMS, PositionManager, KillSwitch, ParameterManager, QuestDBWriter, CRTP strategies).
-- order_router — TBD.
-- feed_router — TBD.
+- [order_router](order-router.md) — TCP server for engine connections, `client_order_id` remapping (`global_coid = (engine_id << 32) \| orig_coid`), BinanceExchange wire layer, routing tables guarded by mutex, per-account rate limiter.
+- trading_system — TBD (the trading engine binary — MarketFeed consumer, OMS, PositionManager, in-process **RiskManager**, KillSwitch, ParameterManager, QuestDBWriter, CRTP strategies).
+- feed_router (market_feed) — TBD.
+
+**Note on RiskManager:** risk checks live inside the trading engine, not as a separate container. Target <100ns per check makes IPC-based risk unworkable. See [Level 2 note](../01-containers/live-trading.md) and the RiskManager component under `trading_system` (TBD).
 
 ## Not shown at this level
 
