@@ -252,6 +252,23 @@ The trading engine sits between multiple bounded queues on both the tick-in and 
 
 **Order-queue overflow → KillSwitch.** The `check_order_queue_overflow(prev_push_failures)` method runs each main-loop iteration. If push failures are climbing, that means the engine can't drain the strategy's intents — a symptom that either the strategy is misbehaving (spamming orders) or the exchange path is stuck. In either case, the safe response is `KillSwitch::trip` → `cancel_all_orders` + `emergency_halt`. ProcessManager restarts the engine, and position recovery reconciles state from QuestDB.
 
+## Time sources and clock discipline
+
+Every component that reads or emits a timestamp uses one of three clocks. Mixing them is a bug — the wrong clock for the wrong purpose causes silent latency-measurement errors or non-monotonic sequencing under NTP correction.
+
+| Clock | Source | Used for |
+|-------|--------|----------|
+| **Monotonic (`std::chrono::steady_clock`)** | Local host, kernel-provided monotonic tick counter, never adjusted by NTP | Latency measurement (order round-trip, tick-to-order), rate-limiter windows (RiskManager rate window, order_router's send rate), timeouts (WS stale threshold, listenKey refresh interval), staleness watchdog. Anything that measures a duration or orders events on this host. |
+| **System wall clock (`std::chrono::system_clock`)** | Local host, kernel-provided epoch time, adjusted by NTP | Log timestamps, metric timestamps in ILP writes to QuestDB, tombstone / audit trail timestamps. Anything that needs to be human-readable or comparable across hosts. |
+| **Venue time** (event time field from Binance messages) | Received from Binance in `E` field of WS messages, `T` field on some events | Ordering trades / depth events against venue-perceived time when reconstructing books or computing venue-side latency. NOT for latency measurement (network path is asymmetric — cannot recover round-trip from a one-way timestamp). |
+
+**Guidance:**
+- Never use `system_clock` for durations. NTP can jump backward mid-measurement and produce negative or spurious latencies.
+- Never use `steady_clock` for external comparison. Two hosts' `steady_clock` epochs are unrelated.
+- Venue time is authoritative for market-event ordering. Local time is authoritative for how long *we* took to react.
+
+**No colo-grade sync.** This host does not run PTP; NTP-tier clock accuracy is what the system runs on. Documented in [live-trading operational notes](../01-containers/live-trading.md). For a system running at retail-broker latency (single-digit ms), NTP is sufficient. If the system were to move toward colo-grade paths (sub-100μs), replacing NTP with PTP would be required, and every timestamp comparison against venue time would need re-auditing.
+
 ## Deliberately not here
 
 - Binance API signing, HTTP details, WebSocket lifecycle — lives inside `BinanceExchange`.
