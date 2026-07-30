@@ -8,9 +8,10 @@ Zooms into a single container from [Level 2](../01-containers/) and shows its in
 
 - [feed_archiver](feed-archiver.md) — internals of the WS collection binary: BinanceFeedManager, per-group pipeline (WS client → SPSC queue → parser → worker), bootstrap coordinator, sequence gap detector, trade reorder buffer, SymbolRecorder.
 - [backtest_app](backtest.md) — replay engine, single-run tick flow, grid search / walk-forward orchestration. CRTP strategy dispatch, deterministic virtual time, mmap tick reader, bounded order book, fill simulator, metrics collector.
+- [risk_manager](risk-manager.md) — small shared service between engines and order_router. Ingest queue, check engine, limits registry, KillSwitch state reader, reject dispatcher.
 - trading_system — TBD (the trading engine binary — MarketFeed consumer, OMS, PositionManager, KillSwitch, ParameterManager, QuestDBWriter, CRTP strategies).
-- risk_manager — TBD.
 - order_router — TBD.
+- feed_router — TBD.
 
 ## Not shown at this level
 
