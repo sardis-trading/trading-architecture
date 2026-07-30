@@ -55,22 +55,30 @@ flowchart LR
         queue["MessageQueue<br/>SPSC ring buffer"]
         worker["Worker thread<br/>consumes queue"]
         parser["BinanceParser<br/>JSON → events"]
+        seqcheck["Sequence gap detector<br/>checks update_id continuity"]
         reorder["Trade reorder buffer<br/>10ms window<br/>(trades only)"]
     end
 
     recorder["SymbolRecorder"]
+    bootstrap["Bootstrap coordinator<br/>(re-bootstrap on gap)"]
 
     lws -->|push| queue
     worker -->|pop| queue
     worker -->|parse| parser
-    parser -->|depth event| recorder
+    parser -->|depth event| seqcheck
     parser -->|trade event| reorder
+    seqcheck -->|in-sequence| recorder
+    seqcheck -.->|gap detected| bootstrap
     reorder -->|ordered trade| recorder
 ```
 
-## 3. Bootstrap phase (BUFFERING → LIVE)
+## 3. Bootstrap phase (BUFFERING → LIVE) and mid-flight gap recovery
 
-On group start each Connection Group is in `BUFFERING` phase. WS diffs stream into a per-symbol buffer while a REST snapshot fetch runs in parallel on the ThreadPool. When the snapshot arrives, the sync condition is checked; on success, the phase flips to `LIVE` and buffered diffs are drained.
+Same mechanism is used in two situations:
+- **On group start**, every symbol begins in `BUFFERING`.
+- **Mid-flight**, when the sequence gap detector catches a discontinuity in `update_id`, the affected symbol is re-entered into `BUFFERING`, its WS diffs buffered, a fresh REST snapshot fetched, and the sync condition re-checked before returning to `LIVE`.
+
+In both cases WS diffs stream into a per-symbol buffer while a REST snapshot fetch runs in parallel on the ThreadPool. When the snapshot arrives, the sync condition is checked; on success, the phase flips to `LIVE` and buffered diffs are drained.
 
 ```mermaid
 flowchart TB
@@ -112,6 +120,7 @@ flowchart TB
 | **Worker thread** | Consumes messages, calls BinanceParser, routes normalized events downstream. One per group. During BUFFERING the worker is gated by phase — events flow into the diff buffer instead of straight to SymbolRecorder. |
 | **BinanceParser** | Stateless JSON → normalized-event translator. Depth-diff messages produce one event per level, so the consumer must handle the emitted buffer. |
 | **Trade reorder buffer** | Bounded 10 ms delay window for `@trade` events. Binance's matching engine is sharded, so trade IDs can arrive slightly out of order; the buffer holds and re-orders. Not applied to depth (depth uses `update_id` for sequencing). |
+| **Sequence gap detector** | Runs on the depth path only. Checks `update_id` continuity across events. On a valid sequence, forwards straight to SymbolRecorder. On a gap, signals Bootstrap coordinator to re-enter BUFFERING for that symbol — same mechanism as initial bootstrap. |
 | **Bootstrap coordinator** | Runs the REST snapshot fetch in parallel with the WS diff buffering, checks the sync condition on snapshot arrival, transitions phase from BUFFERING to LIVE, flushes buffered diffs in order. Kills the group on fetch failure. |
 | **SymbolRecorder** | Per-symbol writer. Formats normalized events into the binary tick file layout (64B-aligned header, mmap-friendly), rotates files, appends to `Local Tick Archive`. Same on-disk format read by Backtest via `data_manager`. |
 | **FeedContext** | Shared per-group state — parsed config, current phase, sequence tracking for gap detection. Passed by reference. |
