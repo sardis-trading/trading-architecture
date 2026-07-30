@@ -58,6 +58,18 @@ flowchart TB
 - **Engine identity:** assigned on accept via `next_engine_id_.fetch_add(1)` — engines don't choose their own id. Range is 32 bits, so this container supports ~4 billion engine lifetimes before wrapping, which is not a real concern.
 - **coid remapping:** the mechanism that keeps engines completely unaware of each other. Each engine's coid space is its own; no coordination needed. Collisions between engines are impossible by construction.
 
+## Backpressure and overflow behavior
+
+Every engine submits into `order_router` over TCP; every response fans back out over the same TCP connections. Two natural chokepoints: the per-engine TCP receive path, and the shared per-account rate limit hitting Binance.
+
+| Queue / buffer | Bound | Behavior on full | Rationale |
+|----------------|-------|-------------------|-----------|
+| **Per-engine TCP receive buffer** (kernel + `EngineConnection` `recv_buf_`) | 256 bytes application-side, kernel buffer beyond that | If application read lags, kernel TCP window closes and back-pressures the sending engine. `RouterExchange`'s `send` will eventually block or return short-writes. | Standard TCP flow control — no custom queue needed at the application layer. |
+| **Rate limiter token bucket** (network::RateLimiter) | Configured tokens per period | When tokens are exhausted, `handle_submit` / `handle_cancel` fail-fast, return `RATE_LIMITED` to the engine via the same `EngineConnection`. Engine's own RiskManager should have caught this earlier via its rate check, but this is the wire-layer safety net. | Rate-limit failures are cheaper to surface as fast-fail than to queue (queued sends risk stale intents). |
+| **Routing tables** (`engine_id_to_fd_`, `global_coid_to_engine_`) | Grow with open-order count | Bounded implicitly by concurrent open orders per engine (typically hundreds, not millions). Mutex-guarded so cross-thread inserts serialize. | Not a queue per se, but worth noting: unbounded growth means an engine leaking `client_order_id`s would accumulate here. Order tombstoning on ack/fill prunes. |
+
+**Sending fills back:** `on_exec_report` looks up the destination engine and writes to its `conn_fd`. If that engine has died or is stalled reading, the write may fail — the report is logged and dropped (not queued for later). Engines are expected to reconcile from `BinanceExchange`'s state on restart, not from missed-report queues.
+
 ## Deliberately not here
 
 - Binance API signing, headers, endpoint URLs — that's inside `BinanceExchange`, not this container.

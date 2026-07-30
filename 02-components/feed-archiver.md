@@ -126,6 +126,19 @@ flowchart TB
 | **FeedContext** | Shared per-group state — parsed config, current phase, sequence tracking for gap detection. Passed by reference. |
 | **ThreadPool** | General-purpose pool used by Bootstrap for parallel snapshot fetches. Not per-group; shared across all groups. |
 
+## Backpressure and overflow behavior
+
+Every bounded queue in this container has a defined behavior when it fills. The overarching principle: the LWS thread never blocks. If any consumer downstream can't keep up, upstream data is dropped or the group is escalated to a kill signal — never held.
+
+| Queue / buffer | Bound | Behavior on full | Rationale |
+|----------------|-------|-------------------|-----------|
+| **MessageQueue (SPSC)** | Config-defined ring capacity (~ 4096–65536) | LWS thread drops the message and increments a drop counter. Never blocks. | Blocking here would back-pressure into libwebsockets and starve other groups; dropped messages are a smaller harm than a stalled service loop. |
+| **Per-symbol diff buffer** (during BUFFERING) | Bounded per-symbol slot count | Oldest buffered diff is discarded; if the buffer overflows before sync condition is reached, Bootstrap escalates to kill. | During bootstrap the buffer size sets an upper bound on how long the REST snapshot can take before recovery is impossible. |
+| **Trade reorder buffer** | 10 ms window (time-bounded, not count) | Events past the window flush regardless — never a "full" condition. | Time-bounded resolves out-of-order without letting the buffer grow. |
+| **ThreadPool queue** (Bootstrap snapshot fetches) | Bounded task queue | Fetch requests block briefly at enqueue if the pool is saturated. Snapshots aren't hot-path so blocking is acceptable here. | Bootstrap runs during BUFFERING; slight enqueue latency doesn't affect LIVE path. |
+
+**Kill-on-overflow:** any repeated MessageQueue drops in a single group or a diff-buffer overflow during bootstrap escalates to killing that group. `BinanceFeedManager` sees the signal, joins the worker, disconnects the LWS client. Other groups continue running unaffected.
+
 ## Deliberately not here
 
 - Binance JSON schema and per-message field details — a venue concern, lives near `BinanceParser` in code.

@@ -74,6 +74,18 @@ flowchart TB
 - **Engine read side:**
   Each trading engine opens the shm ring for its configured symbol independently. `market_feed` doesn't know or track which engines are subscribed — subscription is one-sided, engine-driven.
 
+## Backpressure and overflow behavior
+
+Same overarching principle as `feed_archiver`: the LWS thread never blocks. If any downstream component can't keep up, ticks are dropped in a bounded way and drop counters go into the health signal.
+
+| Queue / buffer | Bound | Behavior on full | Rationale |
+|----------------|-------|-------------------|-----------|
+| **MDM internal tick queue** (between BinanceClient callback and `try_pop_tick`) | Bounded ring | On full, LWS producer drops the tick, increments a drop counter tracked in `mdm.stats()`. Never blocks. | Same as feed_archiver's MessageQueue — WS thread is producer-only, blocking would stall all groups. |
+| **ShmTickPublisher ring** (per symbol) | 65536 slots | SPSC lock-free ring — slow reader (engine) does not block publisher; oldest tick gets overwritten on wrap. Engine detects lag via sequence-number gap. | Market data staleness is a smaller harm than a blocked publisher. Engine's own subscription lag is its problem to detect. |
+| **Bootstrap-phase diff buffer** (in MDM) | Bounded per-symbol slot count | Overflow before sync escalates the symbol to a recovery-mask bit; `do_recovery_if_needed()` re-fetches the REST snapshot. | Bounded buffer means we can't wait indefinitely for an initial snapshot — bounded recovery is preferred to bounded memory growth. |
+
+**Health-signal coupling.** Every drop increments a counter that eventually surfaces through the `progress_hook`. If ticks stop advancing (`ticks_published` delta stays at zero over the interval) or drops spike, the hook fires with `ticks_advanced = false` — apps map this to `HP_UNHEALTHY` so ProcessManager can decide whether to restart.
+
 ## Deliberately not here
 
 - MarketDataManager internals (per-symbol book format, sequence validation, recovery mask layout) — MDM has its own component-level structure that belongs in a marketdata-focused doc.

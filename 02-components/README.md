@@ -10,7 +10,7 @@ Zooms into a single container from [Level 2](../01-containers/) and shows its in
 - [backtest_app](backtest.md) — replay engine, single-run tick flow, grid search / walk-forward orchestration. CRTP strategy dispatch, deterministic virtual time, mmap tick reader, bounded order book, fill simulator, metrics collector.
 - [order_router](order-router.md) — TCP server for engine connections, `client_order_id` remapping (`global_coid = (engine_id << 32) \| orig_coid`), BinanceExchange wire layer, routing tables guarded by mutex, per-account rate limiter.
 - [market_feed](market-feed.md) — WS collection + book maintenance + per-symbol shm publishing. N connection groups (LwsService + BinanceClient), MarketDataManager, ShmTickPublisher per symbol, health hooks.
-- trading_system — TBD (the trading engine binary — MarketFeed consumer, OMS, PositionManager, in-process **RiskManager**, KillSwitch, ParameterManager, QuestDBWriter, CRTP strategies).
+- [trading_system (trading-engine)](trading-engine.md) — the trading engine itself. TradingEngineBase + TradingEngine CRTP template, ShmTickSubscribers reading from market_feed, Strategy + Quoter + FilterProvider, OrderEngine hosting OrderManager + PositionManager + in-process RiskManager, ExchangeImpl (Binance or Simulated), KillSwitch compliance layer, capital manager (Layer 1/2), ParamServer + UdpAnnouncer, MetricsRegistry + MetricsHttpServer + QuestDBWriter.
 
 **Note on RiskManager:** risk checks live inside the trading engine, not as a separate container. Target <100ns per check makes IPC-based risk unworkable. See [Level 2 note](../01-containers/live-trading.md) and the RiskManager component under `trading_system` (TBD).
 

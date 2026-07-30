@@ -110,6 +110,17 @@ flowchart TB
 | **WalkForwardOptimization** | Templated `run<Strategy>()`. Same as GridSearch but with rolling (train, test) windows for out-of-sample validation. |
 | **data_manager library** | In-process resolver. Given a `(symbol, from, to)` request, returns a local file path — checking the local cache and pulling from the cloud data_manager daemon if the range isn't already local. Blocks until the requested range is available. See [Level 2](../01-containers/backtest.md). |
 
+## Backpressure and overflow behavior
+
+Backtest is deterministic and single-threaded on the main tick loop, so backpressure is much simpler than in the live path. The main queue is between strategy and engine, and the engine controls the pace by driving the tick loop itself.
+
+| Queue / buffer | Bound | Behavior on full | Rationale |
+|----------------|-------|-------------------|-----------|
+| **Order SPSC queue** (strategy → engine) | Bounded ring | On full, `submit`/`cancel` from strategy returns fast-fail immediately. Strategy handles by dropping the intent or retrying next tick. | Backtest is deterministic — a full queue is a bug in strategy sizing, not a runtime condition. Fast-fail surfaces the bug loudly. |
+| **MetricsCollector's fill journal** | Grows unbounded during a run | No cap — memory grows with number of fills. One-shot process, released at run end. | For a bounded run this is fine; for very long ranges (multi-year sweeps) it becomes a memory concern noted in the operations doc. |
+
+**Deterministic replay implication:** because `VirtualTimeManager` only advances via the tick loop and there are no wall-time reads, there is no "producer faster than consumer" case — the engine IS both producer (of ticks) and consumer (of orders). Backpressure in backtest is a strategy-side self-inflicted wound, not a system-level runtime condition.
+
 ## Deliberately not here
 
 - Fill model details (maker/taker fee schedules, slippage assumptions) — belong to `FillSimulator`'s own docs.
