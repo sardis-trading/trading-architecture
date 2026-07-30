@@ -70,6 +70,34 @@ Every engine submits into `order_router` over TCP; every response fans back out 
 
 **Sending fills back:** `on_exec_report` looks up the destination engine and writes to its `conn_fd`. If that engine has died or is stalled reading, the write may fail — the report is logged and dropped (not queued for later). Engines are expected to reconcile from `BinanceExchange`'s state on restart, not from missed-report queues.
 
+## Reconnect, retry, and listenKey refresh
+
+`order_router` owns the two persistent connections to Binance — REST for orders, WebSocket for User Data Stream (UDS). Each has its own failure and refresh discipline.
+
+### REST retry policy
+
+Order submits and cancels can fail transiently (network blip, HTTP 5xx, timeout). The wire layer inside `BinanceExchange` retries with a small bounded set of attempts and exponential backoff. Rate-limit errors (HTTP 429 or `-1003`) are *not* retried on the same request — retrying under rate-limit only makes it worse; the rate limiter is expected to have caught this before the send.
+
+Non-transient errors (invalid parameters, filter rejections, insufficient balance) are surfaced immediately as `ExecutionReport` reject with the reason code. No retry. The originating engine's Strategy receives `on_order_rejected` and can re-quote next tick.
+
+### listenKey refresh
+
+Binance's User Data Stream requires a `listenKey` obtained via `POST /api/v3/userDataStream`. The key expires after ~60 minutes of inactivity if not refreshed via `PUT /api/v3/userDataStream`. `order_router` keeps a timer that refreshes every ~30 minutes — well inside the expiry window, tolerant of brief outages.
+
+If the refresh call fails, the timer retries with backoff. If the listenKey actually expires, the UDS WebSocket disconnects and needs re-establishment (create new key, subscribe fresh).
+
+### UDS reconnect
+
+UDS WebSocket drops are handled by the same LwsService pattern as market_feed's connection groups: exponential backoff, capped delay, health event on reconnect. When a fresh UDS connection is established:
+
+1. Any account events that occurred during the disconnect window are lost from the WS stream.
+2. `order_router` reconciles state by calling `GET /api/v3/openOrders` and `GET /api/v3/account` after reconnect. Any mismatch between local routing tables (`global_coid_to_engine_`) and venue-reported open orders is resolved by trusting the venue.
+3. Fills that landed during the disconnect are reconstructed from the venue's `myTrades` history and forwarded to the originating engines with a `LATE_FILL` flag so they can update PositionManager without double-counting.
+
+### Escalation to KillSwitch
+
+If UDS is disconnected for longer than `stale_killswitch_s`, `BinanceUserDataStream` fires `KillSwitch::activate(MARKET_DISCONNECT)`. Every engine on the host trips together — this is the `EXTERNAL_SIGNAL` shape from the engine side, sourced from `order_router`.
+
 ## Deliberately not here
 
 - Binance API signing, headers, endpoint URLs — that's inside `BinanceExchange`, not this container.

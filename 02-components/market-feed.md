@@ -86,6 +86,22 @@ Same overarching principle as `feed_archiver`: the LWS thread never blocks. If a
 
 **Health-signal coupling.** Every drop increments a counter that eventually surfaces through the `progress_hook`. If ticks stop advancing (`ticks_published` delta stays at zero over the interval) or drops spike, the hook fires with `ticks_advanced = false` — apps map this to `HP_UNHEALTHY` so ProcessManager can decide whether to restart.
 
+## Reconnect and degradation
+
+WS connections are lossy — Binance drops sessions on network blips, maintenance windows, and rate-limit-related disconnects. Every connection group handles this locally without cross-group coordination.
+
+**Reconnect sequence for one group:**
+1. `LwsService` detects disconnect via libwebsockets callback (either explicit close, TCP RST, or heartbeat timeout).
+2. `BinanceClient` state transitions to `RECONNECTING`, fires `event_hook(WARN, "reconnecting")` if wired.
+3. Reconnect attempt runs on the same `mf-ws-N` thread with exponential backoff (starts short, capped at a few seconds — connectivity outages are transient in normal operation, longer waits during known incidents).
+4. On successful reconnect, subscribe streams re-established, MDM sets recovery-mask bits for every symbol on that group.
+5. Main loop notices the bits via `do_recovery_if_needed()`, fetches REST snapshots for those symbols, re-syncs books, clears bits.
+6. `event_hook(INFO, "recovered")` fires.
+
+**Persistent failure escalation.** If reconnect attempts fail past a configurable threshold (or REST snapshot fails during recovery), the group is escalated to a kill signal — same as bootstrap failure. `BinanceFeedManager` joins the worker, disconnects LWS, and surfaces the failure via `event_hook(ERROR, ...)`. Other groups keep running.
+
+**Cross-container implication:** every symbol in a failed group stops publishing to shm. Trading engines subscribing to those symbols see ticks stop advancing. Their `TickStalenessWatchdog` catches this and eventually trips `MARKET_DISCONNECT` on their side.
+
 ## Deliberately not here
 
 - MarketDataManager internals (per-symbol book format, sequence validation, recovery mask layout) — MDM has its own component-level structure that belongs in a marketdata-focused doc.
