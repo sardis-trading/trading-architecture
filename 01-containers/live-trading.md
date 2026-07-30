@@ -72,7 +72,7 @@ flowchart TB
     feedrouter -->|publishes| shmfeed
     shmfeed -->|reads| engines_data
 
-    engines_data -->|submit / cancel (after in-engine risk check)| orderrouter
+    engines_data -->|"submit / cancel (after in-engine risk check)"| orderrouter
     orderrouter <-->|REST orders + UDS fills| binance
     orderrouter -->|route fills to originating engine| engines_data
 

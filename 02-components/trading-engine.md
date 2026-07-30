@@ -147,8 +147,8 @@ flowchart TB
 
     questdb_ext[("QuestDB")]
 
-    orderrouter -->|ExecutionReport (wire)| exchange
-    exchange -->|on_exec_report callback<br/>(TcpConnector I/O thread)| oe
+    orderrouter -->|"ExecutionReport (wire)"| exchange
+    exchange -->|"on_exec_report callback<br/>(TcpConnector I/O thread)"| oe
 
     oe -->|update state| om
     oe -->|forward to strategy| strat
