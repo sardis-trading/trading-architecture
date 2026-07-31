@@ -10,8 +10,8 @@ This is the flagship flow — a stranger reading the docs should be able to foll
 sequenceDiagram
     autonumber
     participant S as Strategy
-    participant OE as OrderEngine<br/>(hosts Risk, OrderMgr,<br/>PositionMgr)
-    participant RX as RouterExchange<br/>(TCP client)
+    participant OE as OrderEngine
+    participant RX as RouterExchange
     participant OR as order_router
     participant Bin as Binance
 

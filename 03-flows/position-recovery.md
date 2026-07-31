@@ -10,7 +10,7 @@ Whenever a trading engine restarts — crash, KillSwitch trip, config change, de
 sequenceDiagram
     autonumber
     participant PM as ProcessManager
-    participant Eng as new trading_system<br/>process
+    participant Eng as new trading_system process
     participant QDB as QuestDB
     participant OR as order_router
     participant Bin as Binance
