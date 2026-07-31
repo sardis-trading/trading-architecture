@@ -4,11 +4,10 @@ Sequence diagrams and behavioral flows for things that span multiple containers 
 
 ## Flows
 
+- [Order lifecycle](order-lifecycle.md) — flagship flow. Full path from strategy `submit()` through in-engine RiskManager, OrderManager allocation, RouterExchange, TCP to order_router, BinanceExchange, Binance, and the reverse path for ack + fill including PositionManager and Strategy `on_fill`. Covers happy path plus pre-trade reject, venue reject, partial fills, and late-fill-after-reconnect branches. Includes a rough timing-budget table for the hot path.
 - [Position recovery after restart](position-recovery.md) — how a fresh engine reconstructs its `PositionManager` and `OrderManager` from QuestDB fill history + venue open-order reconciliation, including the guarantees and non-guarantees.
 
 ## Planned
-
-- Order lifecycle — full path from strategy `submit()` through in-engine RiskManager, OrderEngine, RouterExchange, TCP to order_router, BinanceExchange, Binance venue, and the reverse path for ack + fill including PositionManager and Strategy `on_fill`.
 - Tick flow — Binance WS to market_feed to shm ring to trading_system's ShmTickSubscriber to MDM to Strategy.
 - WS gap recovery — gap detected → recovery mask bit set → main loop notices → REST snapshot fetch → book re-sync → mask cleared. Covers both feed_archiver and market_feed variants.
 - Bootstrap protocol — feed_archiver startup, BUFFERING → LIVE transition with parallel REST + WS diff buffering, sync condition check.
