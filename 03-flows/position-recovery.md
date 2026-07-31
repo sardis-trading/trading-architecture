@@ -15,27 +15,27 @@ sequenceDiagram
     participant OR as order_router
     participant Bin as Binance
 
-    Note over PM: previous engine died<br/>(crash / trip / restart)
+    Note over PM: previous engine died (crash / trip / restart)
     PM->>Eng: fork+exec with engine config
     Note over Eng: TradingEngineBase::initialize_infrastructure()
-    Eng->>QDB: SELECT fills WHERE engine_id = X<br/>AND ts > last_checkpoint
+    Eng->>QDB: SELECT fills WHERE engine_id = X AND ts > last_checkpoint
     QDB-->>Eng: fill history rows
-    Note over Eng: replay fills into PositionManager<br/>reconstruct: position, avg entry,<br/>realised PnL, equity curve
+    Note over Eng: replay fills into PositionManager reconstruct: position, avg entry, realised PnL, equity curve
 
     Eng->>OR: connect via TCP (engine_id assigned)
     OR-->>Eng: CONNECT_ACK + engine_id
 
     Eng->>OR: query open orders (GET_OPEN_ORDERS)
-    OR->>Bin: GET /api/v3/openOrders<br/>(if not cached)
+    OR->>Bin: GET /api/v3/openOrders (if not cached)
     Bin-->>OR: open orders list
-    OR-->>Eng: open orders for this engine<br/>(filtered by global_coid high bits)
+    OR-->>Eng: open orders for this engine (filtered by global_coid high bits)
 
-    Note over Eng: for each open order:<br/>OrderManager::register_recovered(...)<br/>installs a tombstone-shaped entry so<br/>future fills / cancels resolve correctly
+    Note over Eng: for each open order: OrderManager::register_recovered(...) installs a tombstone-shaped entry so future fills / cancels resolve correctly
 
-    Note over Eng: capital caps applied via<br/>Layer 2 on first BUDS balance msg
+    Note over Eng: capital caps applied via Layer 2 on first BUDS balance msg
 
     Eng->>Eng: start main tick loop
-    Note over Eng: engine is now "hot" —<br/>strategy sees correct position,<br/>can trade
+    Note over Eng: engine is now "hot" — strategy sees correct position, can trade
 ```
 
 ## Why QuestDB is the source of truth for fills

@@ -13,16 +13,16 @@ sequenceDiagram
     participant OR as order_router
     participant Bin as Binance
 
-    Note over OE,Bin: Naive path — for illustration only,<br>NOT what we do
+    Note over OE,Bin: Naive path — for illustration only, NOT what we do
     OE->>OR: submit(coid=X)
     OR->>Bin: POST /order (coid=X)
-    Note over Bin: order X is in flight,<br>not yet accepted
+    Note over Bin: order X is in flight, not yet accepted
     OE->>OR: cancel(coid=X)
     OR->>Bin: DELETE /order (coid=X)
-    Bin-->>OR: 400 error<br>{code: -2011, "Unknown order sent"}
-    Note over Bin: cancel failed because<br>X isn't in the venue's book yet
-    Bin-->>OR: (later) 200 OK for POST<br>order X now live at venue
-    Note over OE,Bin: engine thinks X is cancelled,<br>venue thinks X is live and quoting.<br>Orphan order at venue.<br>Bug-4.
+    Bin-->>OR: 400 error {code: -2011, "Unknown order sent"}
+    Note over Bin: cancel failed because X isn't in the venue's book yet
+    Bin-->>OR: (later) 200 OK for POST order X now live at venue
+    Note over OE,Bin: engine thinks X is cancelled, venue thinks X is live and quoting. Orphan order at venue. Bug-4.
 ```
 
 The orphan is the failure mode. Engine's `OrderManager` marked coid X as cancelled and moved on. Venue has coid X live at some price and will happily fill it. Positions and risk are wrong until the next full reconciliation.
@@ -40,21 +40,21 @@ sequenceDiagram
 
     OE->>OR: submit(coid=X)
     OR->>Bin: POST /order (coid=X)
-    Note over OR: state[X] = { PENDING_ACK,<br>pending_cancel: false }
+    Note over OR: state[X] = { PENDING_ACK, pending_cancel: false }
 
     OE->>OR: cancel(coid=X)
-    Note over OR: state[X].PENDING_ACK is true<br>→ set pending_cancel = true<br>DO NOT send DELETE yet
+    Note over OR: state[X].PENDING_ACK is true → set pending_cancel = true DO NOT send DELETE yet
 
-    Bin-->>OR: 200 OK for POST<br>{orderId, status: NEW}
-    Note over OR: on ACK, check state[X]:<br>pending_cancel is true<br>→ immediately send DELETE
+    Bin-->>OR: 200 OK for POST {orderId, status: NEW}
+    Note over OR: on ACK, check state[X]: pending_cancel is true → immediately send DELETE
     OR->>Bin: DELETE /order (coid=X)
-    Note over OR: also forward the ACK<br>to originating engine
+    Note over OR: also forward the ACK to originating engine
     OR-->>OE: ExecutionReport {ACK}
 
-    Bin-->>OR: 200 OK for DELETE<br>{status: CANCELED}
+    Bin-->>OR: 200 OK for DELETE {status: CANCELED}
     OR-->>OE: ExecutionReport {CANCELED}
 
-    Note over OE: engine's OrderManager sees<br>ACK then CANCELED for coid X.<br>Order was briefly live at venue,<br>now correctly cancelled. No orphan.
+    Note over OE: engine's OrderManager sees ACK then CANCELED for coid X. Order was briefly live at venue, now correctly cancelled. No orphan.
 ```
 
 ## State machine inside BinanceExchange

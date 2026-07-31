@@ -15,33 +15,33 @@ sequenceDiagram
     participant OR as order_router
     participant Bin as Binance
 
-    Note over S,OE: same process<br/>(trading_system)
+    Note over S,OE: same process (trading_system)
 
-    S->>OE: submit(order intent)<br/>via SPSC queue
-    OE->>OE: RiskManager::check_order()<br/>result = PASS
-    OE->>OE: OrderManager::allocate()<br/>from ObjectPool
+    S->>OE: submit(order intent) via SPSC queue
+    OE->>OE: RiskManager::check_order() result = PASS
+    OE->>OE: OrderManager::allocate() from ObjectPool
     OE->>RX: ExchangeImpl::submit(order)
-    RX->>OR: wire submit<br/>{client_order_id, symbol, side, price, qty}
-    Note over OR: engine_id from TCP conn<br/>global_coid = (engine_id << 32) \| coid<br/>routing table: coid → engine_id
-    OR->>Bin: POST /api/v3/order<br/>(HMAC-signed, rate-limited)
-    Bin-->>OR: 200 OK<br/>{orderId, status: NEW}
+    RX->>OR: wire submit {client_order_id, symbol, side, price, qty}
+    Note over OR: engine_id from TCP conn global_coid = (engine_id << 32) \| coid routing table: coid → engine_id
+    OR->>Bin: POST /api/v3/order (HMAC-signed, rate-limited)
+    Bin-->>OR: 200 OK {orderId, status: NEW}
     Note over OR: ack path
-    OR-->>RX: ExecutionReport {ACK}<br/>original client_order_id restored
+    OR-->>RX: ExecutionReport {ACK} original client_order_id restored
     RX-->>OE: on_exec_report(ACK)
-    OE->>OE: OrderManager::on_order_ack()<br/>state: PENDING → ACKED
+    OE->>OE: OrderManager::on_order_ack() state: PENDING → ACKED
     OE->>S: on_order_state("ACKED")
 
     Note over Bin: match happens on venue
 
-    Bin->>OR: UDS event: EXECUTION_REPORT<br/>{status: FILLED, fillQty, fillPrice}
+    Bin->>OR: UDS event: EXECUTION_REPORT {status: FILLED, fillQty, fillPrice}
     Note over OR: fill path
     OR-->>RX: ExecutionReport {FILL}
     RX-->>OE: on_exec_report(FILL)
-    OE->>OE: PositionManager::apply_fill()<br/>update position, avg entry, PnL
+    OE->>OE: PositionManager::apply_fill() update position, avg entry, PnL
     OE->>OE: RiskManager::update_daily_pnl()
-    OE->>OE: OrderManager::on_fill()<br/>tombstone if fully filled
+    OE->>OE: OrderManager::on_fill() tombstone if fully filled
     OE->>S: on_fill(fill)
-    Note over S: strategy may re-quote<br/>next tick
+    Note over S: strategy may re-quote next tick
 ```
 
 ## Branches from the happy path

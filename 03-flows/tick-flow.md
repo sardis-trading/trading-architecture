@@ -13,24 +13,24 @@ sequenceDiagram
     participant TE as trading_system
     participant S as Strategy
 
-    Bin->>MF: WS depth event<br/>{u, U, symbol, bids, asks}
-    Note over MF: LWS client thread (mf-ws-N)<br/>pushes to MDM queue via SPSC
-    MF->>MF: BinanceClient::on_message()<br/>-> MDM::on_ws_market_data()
-    MF->>MF: BinanceParser: JSON -> NormalizedTick(s)<br/>(one per level for depth diffs)
-    MF->>MF: sequence check on update_id<br/>result: continuous
-    MF->>MF: OrderBookL2::apply_diff()<br/>local book updated
+    Bin->>MF: WS depth event {u, U, symbol, bids, asks}
+    Note over MF: LWS client thread (mf-ws-N) pushes to MDM queue via SPSC
+    MF->>MF: BinanceClient::on_message() -> MDM::on_ws_market_data()
+    MF->>MF: BinanceParser: JSON -> NormalizedTick(s) (one per level for depth diffs)
+    MF->>MF: sequence check on update_id result: continuous
+    MF->>MF: OrderBookL2::apply_diff() local book updated
     MF->>MF: MDM: enqueue NormalizedTick(s)
-    Note over MF: main thread run() loop<br/>drains via MDM::try_pop_tick()
-    MF->>Shm: ShmTickPublisher::publish(tick)<br/>SPSC lock-free write
+    Note over MF: main thread run() loop drains via MDM::try_pop_tick()
+    MF->>Shm: ShmTickPublisher::publish(tick) SPSC lock-free write
 
-    Note over Shm: publisher and subscriber<br/>are separate processes<br/>coordinating via shm
+    Note over Shm: publisher and subscriber are separate processes coordinating via shm
 
     Shm-->>TE: ShmTickSubscriber non-blocking pop
     TE->>TE: pump_ticks(): drain subscriber
-    Note over TE: paper mode only —<br/>local MDM.apply_diff for SimulatedExchange<br/>(skipped in live)
+    Note over TE: paper mode only — local MDM.apply_diff for SimulatedExchange (skipped in live)
     TE->>S: on_tick_impl(tick)
-    S->>S: strategy logic:<br/>update quotes, evaluate signals,<br/>compute desired orders
-    Note over S: if strategy submits orders,<br/>see order-lifecycle.md from step 1
+    S->>S: strategy logic: update quotes, evaluate signals, compute desired orders
+    Note over S: if strategy submits orders, see order-lifecycle.md from step 1
 ```
 
 ## Branches
